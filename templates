@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sudani Mind AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #343541; color: #ececf1; height: 100vh; display: flex; overflow: hidden;
+        }
+        #sidebar {
+            width: 260px; background: #202123; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+            border-left: 1px solid #4a4b5a; overflow-y: auto; flex-shrink: 0;
+        }
+        #new-chat-btn {
+            background: #0b93f6; border: none; color: white; padding: 14px; border-radius: 8px; font-weight: 600;
+            cursor: pointer; width: 100%; font-size: 15px;
+        }
+       .conv-item {
+            padding: 10px 12px; background: #2d2d3a; border-radius: 6px; cursor: pointer; font-size: 14px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+       .conv-item.active { background: #3a3b4a; border-right: 3px solid #0b93f6; }
+       .delete-conv { background: transparent; border: none; color: #8e8ea0; cursor: pointer; font-size: 16px; }
+        #main-area { flex: 1; display: flex; flex-direction: column; height: 100vh; }
+        #chat-container { flex: 1; overflow-y: auto; padding: 20px 10%; display: flex; flex-direction: column; gap: 12px; }
+       .message {
+            padding: 14px 20px; border-radius: 14px; max-width: 80%; word-wrap: break-word; line-height: 1.7;
+        }
+       .user { align-self: flex-end; background: #0b93f6; color: white; }
+       .bot { align-self: flex-start; background: #444654; color: #ececf1; }
+       .user img,.bot img { max-width: 250px; border-radius: 8px; margin-top: 8px; display: block; }
+        #loading { display: none; align-self: flex-start; background: #444654; padding: 12px 20px; border-radius: 14px; }
+       .error-msg { color: #ff6b6b; background: #3d1f1f; padding: 12px 18px; border-radius: 10px; }
+        #input-area {
+            background: #40414f; padding: 16px 10%; display: flex; gap: 12px; border-top: 1px solid #565869;
+            align-items: center;
+        }
+        #user-input {
+            flex: 1; padding: 14px 22px; border: none; border-radius: 30px; background: #2d2d3a; color: white;
+            font-size: 16px; outline: none;
+        }
+        #file-input { display: none; }
+        #upload-btn {
+            background: #444654; color: white; border: none; border-radius: 50%; width: 45px; height: 45px;
+            font-size: 22px; cursor: pointer; flex-shrink: 0;
+        }
+        #send-btn {
+            background: #0b93f6; color: white; border: none; border-radius: 30px; padding: 0 32px;
+            font-weight: 600; cursor: pointer; font-size: 16px;
+        }
+       .file-preview { font-size: 12px; opacity: 0.8; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <button id="new-chat-btn">➕ محادثة جديدة</button>
+        <div id="conv-list"></div>
+    </div>
+    <div id="main-area">
+        <div id="chat-container">
+            <div class="message bot">مرحباً! ارفع صورة او PDF واسألني عنها 👇</div>
+            <div id="loading">⏳ جاري التفكير...</div>
+        </div>
+        <div id="input-area">
+            <button id="upload-btn" title="ارفع ملف">📎</button>
+            <input type="file" id="file-input" accept="image/*,.pdf,.txt,.py,.md">
+            <input type="text" id="user-input" placeholder="اكتب رسالتك او ارفع ملف...">
+            <button id="send-btn">إرسال</button>
+        </div>
+    </div>
+
+    <script>
+        let currentConvId = null, lastBotElement = null, lastUserMessage = '', selectedFile = null;
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const loadingDiv = document.getElementById('loading');
+        const convList = document.getElementById('conv-list');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const fileInput = document.getElementById('file-input');
+        const uploadBtn = document.getElementById('upload-btn');
+
+        function addMessage(text, sender, fileData=null, showActions=false) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}`;
+            if(text) msgDiv.innerHTML += `<span>${text}</span>`;
+            if(fileData && fileData.type.startsWith('image/')) {
+                msgDiv.innerHTML += `<img src="${fileData.url}" alt="uploaded image">`;
+            } else if(fileData) {
+                msgDiv.innerHTML += `<div class="file-preview">📎 ${fileData.name}</div>`;
+            }
+            chatContainer.insertBefore(msgDiv, loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            if(sender === 'bot') lastBotElement = msgDiv;
+        }
+        function addError(text) {
+            const errDiv = document.createElement('div');
+            errDiv.className = 'message bot error-msg';
+            errDiv.textContent = '⚠️ ' + text;
+            chatContainer.insertBefore(errDiv, loadingDiv);
+        }
+
+        uploadBtn.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => {
+            selectedFile = e.target.files[0];
+            if(selectedFile) userInput.placeholder = `ملف مختار: ${selectedFile.name}`;
+        };
+
+        async function sendMessage() {
+            const message = userInput.value.trim();
+            if (!message &&!selectedFile) return;
+
+            lastUserMessage = message;
+            let fileData = null;
+            if(selectedFile) {
+                fileData = {name: selectedFile.name, type: selectedFile.type, url: URL.createObjectURL(selectedFile)};
+            }
+            addMessage(message, 'user', fileData);
+            userInput.value = '';
+
+            loadingDiv.style.display = 'block';
+            const formData = new FormData();
+            formData.append('message', message);
+            if(selectedFile) formData.append('file', selectedFile);
+
+            try {
+                const response = await fetch('/chat', { method: 'POST', body: formData });
+                const data = await response.json();
+                loadingDiv.style.display = 'none';
+                if (data.error) addError(data.error);
+                else { addMessage(data.reply, 'bot'); await loadConversations(); }
+            } catch (err) {
+                loadingDiv.style.display = 'none'; addError('فشل الاتصال بالخادم.');
+            }
+            selectedFile = null; fileInput.value = ''; userInput.placeholder = 'اكتب رسالتك...';
+        }
+
+        async function loadCurrentHistory() {
+            const resp = await fetch('/get_history'); const data = await resp.json();
+            document.querySelectorAll('.message').forEach(el => el.remove());
+            if (data.history && data.history.length > 0) {
+                data.history.forEach((msg) => addMessage(msg.text, msg.role, msg.file));
+            } else addMessage('محادثة جديدة. ارفع ملف واسأل عنه', 'bot');
+        }
+        async function loadConversations() {
+            const resp = await fetch('/list_conversations'); const data = await resp.json();
+            convList.innerHTML = '';
+            data.conversations.forEach(conv => {
+                const div = document.createElement('div'); div.className = 'conv-item';
+                if (conv.id === currentConvId) div.classList.add('active');
+                div.innerHTML = `<span>${conv.preview}</span><button class="delete-conv" data-id="${conv.id}">✕</button>`;
+                div.onclick = () => switchConversation(conv.id);
+                div.querySelector('.delete-conv').onclick = (e) => {e.stopPropagation(); deleteConversation(conv.id);};
+                convList.appendChild(div);
+            });
+        }
+        async function switchConversation(convId) {
+            const resp = await fetch('/switch_chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conv_id: convId})});
+            const data = await resp.json(); currentConvId = convId;
+            document.querySelectorAll('.message').forEach(el => el.remove());
+            data.history.forEach((msg) => addMessage(msg.text, msg.role, msg.file));
+            await loadConversations();
+        }
+        async function deleteConversation(convId) {
+            await fetch('/delete_chat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({conv_id: convId})});
+            await loadConversations(); await loadCurrentHistory();
+        }
+        async function newConversation() {
+            const resp = await fetch('/new_chat', {method: 'POST'}); const data = await resp.json();
+            currentConvId = data.conv_id; document.querySelectorAll('.message').forEach(el => el.remove());
+            addMessage('محادثة جديدة. كيف اساعدك؟', 'bot'); await loadConversations();
+        }
+
+        sendBtn.onclick = sendMessage;
+        userInput.onkeydown = (e) => { if (e.key === 'Enter' &&!e.shiftKey) { e.preventDefault(); sendMessage(); } };
+        newChatBtn.onclick = newConversation;
+
+        (async function init() {
+            const resp = await fetch('/get_history'); const data = await resp.json();
+            currentConvId = data.conv_id; if (data.history) data.history.forEach((msg) => addMessage(msg.text, msg.role, msg.file));
+            await loadConversations();
+        })();
+    </script>
+</body>
+</html>
